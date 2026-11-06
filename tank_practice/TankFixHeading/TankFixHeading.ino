@@ -10,13 +10,17 @@ const double SLOW_ZONE = 0.35;   // within 20 degrees: switch to nudging
 const int PULSE_MS = 10;         // how long each nudge turns
 const int SETTLE_MS = 400;       // wait for a fresh vision reading
 
-const int DRIVE_SPEED = 150;
-const int SLOW_DRIVE_SPEED = 90;
-const double SLOW_DIST = 0.30; // slow down within 0.2 meters
+const int DRIVE_SPEED = 150; // drive speed pwm
+const int SLOW_DRIVE_SPEED = 90; // drive speed pwm when close
+const double SLOW_DIST = 0.30; // slow down within 0.3 meters
 const double STOP_DIST = 0.05; // close enough to target
+const double STEER_GAIN = 400;   // extra PWM per radian of heading error
+const int MAX_STEER = 90;        // cap so it never spins in place while driving
+const double BIG_ERROR = 2 * PI * 30 / 360;  // more than 30 degrees off: stop and turn in place
+const int CREEP_MS = 150;                     // length of one pulse in the last 30 cm
 
 bool startedAtA = false;
-double siteX = 0.5;
+double siteX = 0.176;
 double siteY = 1.5;
 
 // ---------- latest trusted position (filled by updatePose) ----------
@@ -41,6 +45,13 @@ void turnRight(int speed) {
 
 void stopMotors() {
   Tank.turnOffMotors();
+}
+
+void driveSteer(int speed, double error) {
+  int correction = constrain((int)(STEER_GAIN * error), -MAX_STEER, MAX_STEER);
+  Enes100.println(correction);
+  Tank.setLeftMotorPWM(speed - correction);    // left slower, right faster = curve left
+  Tank.setRightMotorPWM(speed + correction);
 }
 
 // ---------- helpers ----------
@@ -74,6 +85,24 @@ void updatePose() {
   poseX = Enes100.getX();
   poseY = Enes100.getY();
   poseTheta = Enes100.getTheta();
+}
+
+void determineStartSite() {
+  updatePose();
+
+  if (poseY > 1) {
+    startedAtA = true;
+    Enes100.println("Started at A, going to B!");
+    siteY = 0.5;
+    siteX = 0.28;
+      } else {
+    Enes100.println("Started at B, going to A!");
+  }
+  
+}
+
+double sensorCheck() {
+  return Tank.readDistanceSensor(1);
 }
 
 // ---------- turning ----------
@@ -110,30 +139,61 @@ void turnToHeading(double targetTheta) {
 // ---------- driving ----------
 void driveToPoint(double targetX, double targetY) {
   updatePose();
-  double dx = targetX - poseX;
-  double dy = targetY - poseY;
-  double targetAngle = atan2(dy, dx);
-  turnToHeading(targetAngle);
+  turnToHeading(atan2(targetY - poseY, targetX - poseX));   // aim once at the start
+  Enes100.println("checkpoint 0");
+
+  bool movingFast = false;
+
   while (true) {
     updatePose();
-    dx = targetX - poseX;
-    dy = targetY - poseY;
-    targetAngle = atan2(dy, dx);
+    double dx = targetX - poseX;
+    double dy = targetY - poseY;
     double dist = sqrt(sq(dx) + sq(dy));
-    fixHeading(poseTheta, targetAngle);
-    int speed = (dist > SLOW_DIST) ? DRIVE_SPEED : SLOW_DRIVE_SPEED;
-    driveForward(speed);
-    delay(200);
-    stopMotors();
-    delay(SETTLE_MS);
-    updatePose();
-    dx = targetX - poseX;
-    dy = targetY - poseY;
-    dist = sqrt(sq(dx) + sq(dy));
-    if (dist < STOP_DIST) {
-      return true;
+    double ahead = dx * cos(poseTheta) + dy * sin(poseTheta);   // target distance straight ahead
+    double error = wrapAngle(atan2(dy, dx) - poseTheta);
+    Enes100.println("checkpoint 1");
+
+    // arrived, or level with / past the target: stop, never turn around
+    if (dist < STOP_DIST || ahead < STOP_DIST) {
+      stopMotors();
+      Enes100.println("checkpoint final");
+      return;
+    }
+
+    if (dist > SLOW_DIST) {
+      if (fabs(error) > BIG_ERROR) {        // way off course: stop and turn in place
+        stopMotors();
+        delay(SETTLE_MS);
+        turnToHeading(atan2(dy, dx));
+        movingFast = false;
+        Enes100.println("checkpoint 2");
+        continue;
+      }
+      driveSteer(DRIVE_SPEED, error);       // far: keep moving, steer as we go
+      movingFast = true;
+      Enes100.println("checkpoint 3");
+      delay(20);
+    } else {
+      if (movingFast) {                     // just entered the last 30 cm: stop once so
+        stopMotors();                       // the vision system catches up
+        Enes100.println("checkpoint 4");
+        delay(SETTLE_MS);                   // let the vision system catch up
+        updatePose();
+        turnToHeading(atan2(targetY - poseY, targetX - poseX));   // re-aim from close up
+        movingFast = false;
+        continue;
+      }
+      driveForward(SLOW_DRIVE_SPEED);       // close: short pulse, stop, fresh reading
+      Enes100.println("checkpoint 5");
+      delay(CREEP_MS);
+      stopMotors();
+      delay(SETTLE_MS);
     }
   }
+}
+
+void drivePastObstacles() {
+  
 }
 
 
@@ -142,12 +202,12 @@ void setup() {
   Enes100.begin("WannerBros", MATERIAL, 169, 1116, 52, 50);
   Tank.begin();
   Enes100.println("Starting driving");
-
+/*
   delay(3000);
-
-  turnToHeading(PI);
-  driveToPoint(0.7, 1.5);
-
+  determineStartSite();
+  driveToPoint(siteX, siteY);
+  Enes100.println("Made it to mission site");
+*/
 
   
 }
