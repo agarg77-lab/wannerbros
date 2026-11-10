@@ -196,7 +196,7 @@ void drivePastObstacles() {
   
 }
 
-
+int quadrant = 0;
 
 void setup() {
   Enes100.begin("WannerBros", MATERIAL, 169, 1116, 52, 50);
@@ -214,5 +214,35 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
+  updatePose();
+  int initquadrant = quadrant;
+  if (poseX > 2) {
+    if (poseY > 1) {
+      quadrant = 1;
+    } else {
+      quadrant = 4;
+    }
+  } else {
+    if (poseY > 1) {
+      quadrant = 2;
+    } else {
+      quadrant = 3;
+    }
+  }
+  Enes100.print("Bot is at (");
+  Enes100.print(poseX);
+  Enes100.print(",");
+  Enes100.print(poseY);
+  Enes100.print(")");
+  if (initquadrant == quadrant) {
+    Enes100.print(" Bot is still in quadrant ");
+    Enes100.println(quadrant);
+  } else {
+    Enes100.print(" Bot has moved to quadrant ");
+    Enes100.println("quadrant");
+  }
+
+  delay(1000);
+
 
 }
